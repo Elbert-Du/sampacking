@@ -419,9 +419,10 @@ def bin_packing_mean(pdfs_input, number_bins, distance_func=ks_2samp):
         pi_tentative = (sum(wei_bin) + w_new) * (len(wei_bin) + 1)
         sum_pdfs = concatenate(pdf_bin + [pdf_new])
         overallDistance = pi_tentative * distance_func(sum_pdfs, sample0)[0]/distance_func(concatenate(pdf_bin), sample0)[0]
-        if overallDistance < c*bin_product #some expression to determine whether we use it
+        c=0.99
+        if overallDistance < c*bin_product: #some expression to determine whether we use it
             accepted = True
-            pdf_bins[j_cur_bin]+=pdfs.pop(k_cur_item)
+            pdf_bins[j_cur_bin].append(pdfs.pop(k_cur_item))
             bins[j_cur_bin].append(weights.pop(k_cur_item))
             indices[j_cur_bin].append(inds.pop(k_cur_item))
             state = j_cur_bin, k_cur_item, len(bins)
