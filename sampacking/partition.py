@@ -157,7 +157,7 @@ def partition_dict_to_subsamples(dict_items, number_of_bins):
 
 
 def try_moving_element(item_a, item_b, mean_phi_over_weights, sample0,
-                       epsilon=0.5, distance_func=ks_2samp):
+                       epsilon=0.5, distance_func=ks_2samp, useAvg = False):
     """
     try moving elements from item_b to item_a to decrease pdf distance and make weight metrics more similar
     :param item_a: weights_a, pdf_a
@@ -166,6 +166,7 @@ def try_moving_element(item_a, item_b, mean_phi_over_weights, sample0,
     :param sample0:
     :param epsilon:
     :param distance_func:
+    :param useAvg
     :return:
 
     given
@@ -195,7 +196,10 @@ def try_moving_element(item_a, item_b, mean_phi_over_weights, sample0,
     diff_a = abs(pi_a + sum_a + (len_a+1)*delta_vector - mean_phi_over_weights)/delta_a
     diff_b = abs(pi_b - sum_b - (len_b-1)*delta_vector - mean_phi_over_weights)/delta_b
     # conversion to a flat list
-    indices_b = argwhere(((1. - diff_a) > 0) & ((1. - diff_b) > 0)).flatten().tolist()
+    if useAvg == False:
+        indices_b = argwhere(((1. - diff_a) > 0) & ((1. - diff_b) > 0)).flatten().tolist()
+    else:
+        indices_b = argwhere(1. - diff_a + 1. - diff_b > 0).flatten().tolist()
     if indices_b:
         pi_dist = []
         pdf_dist = []
@@ -220,7 +224,7 @@ def try_moving_element(item_a, item_b, mean_phi_over_weights, sample0,
 
 
 def try_swapping_elements(item_a, item_b, mean_phi_over_weights, sample0,
-                          epsilon=0.5, distance_func=ks_2samp):
+                          epsilon=0.5, distance_func=ks_2samp, useAvg=False):
     """
     try swapping elements between item_a and item_b to decrease pdf distance and make weight metrics more similar
 
@@ -230,9 +234,11 @@ def try_swapping_elements(item_a, item_b, mean_phi_over_weights, sample0,
     :param sample0:
     :param epsilon:
     :param distance_func:
+    :param useAvg
     :return: sawp_flag, (index of item_a element, index of item_b element)
     epsilon controls how much importance is given to weight based metric vs pdf metric
     epsilon = 1 only pdf metric; epsilon = 0 only weight based metric
+    useAvg = False if we only use improvement on a and b, and True if it improves the average
     """
 
     weight_a, pdf_a = item_a
@@ -251,7 +257,10 @@ def try_swapping_elements(item_a, item_b, mean_phi_over_weights, sample0,
     delta_b = abs(pi_b - mean_phi_over_weights)
     diff_a = abs(pi_a - len_a * delta_matrix - mean_phi_over_weights)/delta_a
     diff_b = abs(pi_b + len_b * delta_matrix - mean_phi_over_weights)/delta_b
-    pairs = argwhere(((1. - diff_a) > 0) & ((1. - diff_b) > 0))
+    if useAvg == False:
+        pairs = argwhere(((1. - diff_a) > 0) & ((1. - diff_b) > 0))
+    else:
+        pairs = argwhere((1-diff_a)+(1-diff_b)>0)
     if pairs.any():
         pi_dist = []
         pdf_dist = []
@@ -314,7 +323,7 @@ def manage_lists(partition_inds, weights, pdfs, sample0, mask_func,
         index_a, index_b = ps_sorted_inds[ia], ps_sorted_inds[ib]
         bin_a, bin_b = bins[index_a], bins[index_b]
         pdf_a, pdf_b = pdf_bins[index_a], pdf_bins[index_b]
-        accepted, (ja, jb) = foo((bin_a, pdf_a), (bin_b, pdf_b), mean_ps, sample0, epsilon, distance_func)
+        accepted, (ja, jb) = foo((bin_a, pdf_a), (bin_b, pdf_b), mean_ps, sample0, epsilon, distance_func, useAvg=False) #useAvg = False and useAvg = True have very similar performances
         if accepted:
             partition_ind_a, partition_ind_b = list(partition_inds[index_a]), list(partition_inds[index_b])
             if ja:
@@ -395,55 +404,29 @@ def bin_packing_mean(pdfs_input, number_bins, distance_func=ks_2samp):
     inds = inds[number_bins:]
     pdfs = pdfs[number_bins:]
 
-    diffs = [x - y for x, y in zip(weights[:-1], weights[1:])]
-    bbs = [0] + [j + 1 for j in range(len(diffs)) if diffs[j] != 0]
-    pdfs2 = [pdfs[bbs[i]:bbs[i + 1]] for i in range(len(bbs) - 1)] + [pdfs[bbs[-1]:]]
-    inds2 = [inds[bbs[i]:bbs[i + 1]] for i in range(len(bbs) - 1)] + [inds[bbs[-1]:]]
-    weights_uni = [weights[bbs[i]] for i in range(len(bbs))]
     j_cur_bin = 0
-    k_cur_weight = 0
+    k_cur_item = 0
 
-    state = -1, -1, -1, -1
-    while weights_uni:
+    state = -1, -1, -1
+    while pdfs:
         ind_bin = indices[j_cur_bin]
         wei_bin = bins[j_cur_bin]
         pdf_bin = pdf_bins[j_cur_bin]
-        ind_strata = inds2[k_cur_weight]
-        wei_strata = weights_uni[k_cur_weight]
-        pdf_strata = pdfs2[k_cur_weight]
+        ind_new = inds[k_cur_item]
+        w_new = weights[k_cur_item]
+        pdf_new = pdfs[k_cur_item]
 
-        pi_tentative = (sum(wei_bin) + wei_strata) * (len(wei_bin) + 1)
-        pi_tentative_min = (sum(wei_bin) + min(weights_uni)) * (len(wei_bin) + 1)
-        if pi_tentative < bin_product:
-            dists = []
-            for pdf in pdf_strata:
-                bin_pdf_dist = distance_func(concatenate(pdf_bin), sample0)[0]
-                bin_pdf_dist_new = distance_func(concatenate(pdf_bin + [pdf]), sample0)[0]
-                diff_pdf = bin_pdf_dist_new / bin_pdf_dist
-                dists.append(diff_pdf)
-            j_best = argmin(array(dists) ** 2)
-            ind_bin.append(ind_strata.pop(j_best))
-            pdf_bin.append(pdf_strata.pop(j_best))
-            wei_bin.append(wei_strata)
+        pi_tentative = (sum(wei_bin) + w_new) * (len(wei_bin) + 1)
+        sum_pdfs = concatenate(pdf_bin + [pdf_new])
+        overallDistance = pi_tentative * distance_func(sum_pdfs, sample0)[0]/distance_func(concatenate(pdf_bin), sample0)[0]
+        if overallDistance < c*bin_product #some expression to determine whether we use it
             accepted = True
-            state = j_cur_bin, k_cur_weight, len(bins), len(weights_uni)
+            pdf_bins[j_cur_bin]+=pdfs.pop(k_cur_item)
+            bins[j_cur_bin].append(weights.pop(k_cur_item))
+            indices[j_cur_bin].append(inds.pop(k_cur_item))
+            state = j_cur_bin, k_cur_item, len(bins)
         else:
             accepted = False
-        if not accepted and state == (j_cur_bin, k_cur_weight, len(bins), len(weights_uni)):
-            print('Loop detected')
-            indices.append([ind_strata.pop()])
-            pdf_bins.append([pdf_strata.pop()])
-            bins.append([wei_strata])
-        if not ind_strata:
-            inds2.pop(k_cur_weight)
-            pdfs2.pop(k_cur_weight)
-            weights_uni.pop(k_cur_weight)
-        if pi_tentative_min > bin_product:
-            indices_output.append(indices.pop(j_cur_bin))
-            pdf_bins.pop(j_cur_bin)
-            bins.pop(j_cur_bin)
-        if weights_uni:
-            k_cur_weight = (k_cur_weight + 1) % len(weights_uni)
         if bins:
             j_cur_bin = (j_cur_bin + 1) % len(bins)
     indices_output.extend(indices)
